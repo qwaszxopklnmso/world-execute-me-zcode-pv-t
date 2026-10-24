@@ -1,0 +1,8 @@
+song.mp3
+__pycache__/
+*.pyc
+*.log
+_shots/
+preview*.html
+sheet*.html
+allframes.html
