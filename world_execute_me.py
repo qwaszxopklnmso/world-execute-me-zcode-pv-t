@@ -406,6 +406,28 @@ class Buf:
                 for x in range(x0, min(W, x0 + ln)):
                     self.fg[ro + x] = col
 
+    def ghost(self, amount, seed, ca=(255, 70, 70), cb=(70, 200, 255)):
+        """Deliberate 'console seizure' artifact: copy runs of characters a
+        few cells sideways with a hot tint — the double-width-font smear
+        look, fired on impact moments."""
+        if amount <= 0:
+            return
+        W, H = self.W, self.H
+        rows = max(1, int(H * amount))
+        for j in range(rows):
+            y = int(rnd(seed * 17 + j * 3) * H) % H
+            dx = 1 + int(rnd(seed * 23 + j * 7) * 3)
+            col = ca if rnd(seed * 31 + j) < 0.5 else cb
+            ro = y * W
+            x0 = int(rnd(seed * 41 + j) * W * 0.5)
+            ln = int(W * (0.25 + 0.5 * rnd(seed * 53 + j)))
+            for x in range(min(W - 1, x0 + dx), min(W, x0 + ln)):
+                sx = x - dx
+                c = self.ch[ro + sx]
+                if c != " ":
+                    self.ch[ro + x] = c
+                    self.fg[ro + x] = col
+
     def flash(self, col, a):
         if a <= 0:
             return
@@ -1506,6 +1528,8 @@ def sc_breakup(buf, c):
         draw_person(buf, you_x, floor, 9, cyanc, keep=max(0.05, keep), seed=li)
         if k < 0.4:
             spawn_particles(c.state, you_x, floor - 4, 5, cyanc, spread=6, up=14, g=80, life=1.0)
+        if k < 0.3:  # the frame tears a little each time she loses a piece
+            buf.ghost(0.1, int(t * 25))
         update_particles(buf, c.state, 0.016)
     else:
         # isolation: me alone in a box, spotlight
@@ -1604,6 +1628,7 @@ def sc_erase(buf, c):
             draw_font(buf, int(cx - font_width("ARGUMENTS", FONT5) / 2), int(cy + 4),
                       "ARGUMENTS", scalec(red, 0.6 + c.pulse * 0.4), FONT5)
             buf.glitch(0.2, int(t * 9))
+            buf.ghost(0.18, int(t * 21))
         else:
             draw_font(buf, int(cx - font_width("ERROR", FONT5) / 2), int(cy - 3),
                       "ERROR", scalec(red, 0.5 + c.pulse * 0.5), FONT5)
@@ -1619,6 +1644,8 @@ def sc_darksim(buf, c):
                scalec((120, 30, 40), 0.9))
     if c.onset > 0.75:
         buf.glitch(0.3, int(t * 11))
+    if c.onset > 0.82:
+        buf.ghost(0.12, int(t * 17))
     if t > 145.6:
         word = "EXECUTION"
         n = clamp((t - 145.6) / 1.6, 0, 1)
@@ -1660,6 +1687,11 @@ def sc_execution(buf, c):
         word = "EXECUTION"
         w = font_width(word, FONT5, sc=1)
         buf.clear_rect(int(cx - w / 2) - 4, int(cy - 6), int(cx + w / 2) + 3, int(cy + 8))
+        if k < 0.2:  # double-strike echo on impact
+            draw_font(buf, int(cx - w / 2) + 3, int(cy - 3), word,
+                      scalec(col, 0.45), FONT5, sc=1, slant=1)
+            draw_font(buf, int(cx - w / 2) + 6, int(cy - 3), word,
+                      scalec(col, 0.22), FONT5, sc=1, slant=1)
         draw_font(buf, int(cx - w / 2), int(cy - 3), word, scalec(col, 1.0),
                   FONT5, sc=1, slant=1)
         # border box around stamp
@@ -1674,6 +1706,8 @@ def sc_execution(buf, c):
         buf.flash((255, 255, 255), max(0.0, 0.55 - k * 4.5))
         buf.shift(int((rnd(int(t * 60)) - 0.5) * 5 * (1 - imp)),
                   int((rnd(int(t * 60) + 1) - 0.5) * 3 * (1 - imp)))
+        if k < 0.22:
+            buf.ghost(0.3, int(t * 40))
         if imp >= 1 and k < 0.5 and c.pulse > 0.9:
             buf.flash(red, 0.12)
     elif 79 <= li <= 81:
@@ -1695,6 +1729,8 @@ def sc_execution(buf, c):
             draw_font(buf, px + fw + 2, int(cy - 3), num, scalec(col, 0.7), FONT5, sc=1)
             buf.shift(int((rnd(int(t * 70) + j) - 0.5) * 4 * (1 - imp)), 0)
             buf.flash(col, max(0.0, 0.35 - kk * 3))
+            if kk < 0.15:
+                buf.ghost(0.2, int(t * 60) + j)
     else:  # 82 final execute button
         draw_hexdump(buf, 0, W, 2, H - 4, t, scalec(red, 0.35), seed=82)
         press = clamp(k / 0.55, 0, 1)
@@ -1719,6 +1755,7 @@ def sc_execution(buf, c):
                     buf.put(cx + math.cos(a) * r, cy + math.sin(a) * r * 0.55,
                             "\u2588", scalec(white, 1 - (k - 0.55)))
                 buf.glitch(0.5, int(t * 20))
+                buf.ghost(0.45, int(t * 33))
     return {"vig": 0.55, "grain": 0.06, "scan": 0.12}
 
 
@@ -1741,6 +1778,7 @@ def sc_exec_chorus(buf, c):
                 slots_y = int(H * 0.16 + (w["slot"] // 4) * (H * 0.24))
                 if t - st.get("stamp_t", 0) < 0.2 and i == st["stamped"] - 1:
                     buf.flash((255, 60, 60), 0.3)
+                    buf.ghost(0.15, int(t * 37))
                 draw_font(buf, slots_x + 6, slots_y + 2, "X", (255, 60, 60), FONT3, sc=1)
         if li == 86:
             draw_font(buf, int(W * 0.40), c.band_top - 8, "ALONE.EXE",
@@ -1888,6 +1926,8 @@ def sc_end(buf, c):
     # CRT power-off: content collapses to a line, then a dot
     if t < 208.2:
         ph = clamp((t - 206.0) / 2.0, 0, 1)
+        if 0.25 < ph < 0.9:  # one last seizure as the tube dies
+            buf.ghost(0.18, int(t * 29))
         gh = (1 - ph) * H
         gw = W * (1 - ph ** 3)
         if ph < 0.85:
