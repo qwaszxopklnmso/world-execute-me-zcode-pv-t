@@ -462,8 +462,8 @@ class Buf:
             for x in range(W):
                 i = row_start + x
                 c, f, b = self.ch[i], self.fg[i], self.bg[i]
-                if c == " " and f is None and b is None:
-                    continue
+                # every cell is emitted (spaces included) so nothing from
+                # the previous frame can survive on screen
                 kf = "d" if f is None else f
                 kb = "d" if b is None else b
                 if kf != last_f:
