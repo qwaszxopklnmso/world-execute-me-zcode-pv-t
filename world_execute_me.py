@@ -757,16 +757,20 @@ def draw_god(buf, cx, cy, s, t, col, gain=1.0):
     buf.ring(cx, cy - s * 1.35, s * 0.3, "\u2500", fg, squish=0.4)
 
 
-def draw_toggle(buf, cx, cy, w, state, col, label_a, label_b, gain=1.0):
-    fg = scalec(col, gain)
-    buf.hline(cx - w, cx + w, cy, "\u2500", fg)
-    buf.put(cx - w, cy, "[", fg)
-    buf.put(cx + w, cy, "]", fg)
+def draw_toggle(buf, cx, cy, w, state, col_a, col_b, gain=1.0):
+    """A two-way switch: active side bright, inactive side dimmed."""
+    track = scalec(mixc(col_a, col_b, 0.45), gain)
+    buf.hline(cx - w, cx + w, cy, "\u2500", track)
+    buf.put(cx - w, cy, "[", track)
+    buf.put(cx + w, cy, "]", track)
+    knob = col_a if state == 0 else col_b
     kx = cx - w + 3 if state == 0 else cx + w - 3
-    buf.put(kx - 1, cy, "\u2588", scalec((255, 255, 255), gain))
-    buf.put(kx, cy, "\u2588", scalec((255, 255, 255), gain))
-    draw_font(buf, cx - w - 3, cy - 6, label_a, scalec((140, 140, 150), gain), FONT3)
-    draw_font(buf, cx + w + 1, cy - 6, label_b, fg, FONT3)
+    buf.put(kx - 1, cy, "\u2588", scalec(mixc(knob, (255, 255, 255), 0.4), gain))
+    buf.put(kx, cy, "\u2588", scalec(knob, gain))
+    act_a = mixc(col_a, (255, 255, 255), 0.35) if state == 0 else scalec(col_a, 0.3)
+    act_b = mixc(col_b, (255, 255, 255), 0.35) if state == 1 else scalec(col_b, 0.3)
+    draw_font(buf, cx - w - 4, cy - 6, "F", scalec(act_a, gain), FONT3)
+    draw_font(buf, cx + w + 2, cy - 6, "M", scalec(act_b, gain), FONT3)
 
 
 def draw_clock(buf, cx, cy, r, t, dayness, gain=1.0):
@@ -961,8 +965,8 @@ def sc_creation(buf, c):
     for i, (_, s) in enumerate(log[:12]):
         buf.text(2, 2 + i, s, scalec(green_d, 0.8))
 
-    # power line always faintly there after line 0
-    if li >= 0:
+    # power line during the boot phase only (it would cross the globe later)
+    if 0 <= li <= 2:
         py = int(H * 0.18)
         buf.hline(0, W - 1, py, "\u2500", green_d)
         sx = (t * 30) % W
@@ -975,7 +979,7 @@ def sc_creation(buf, c):
         if li == 1:
             draw_shield(buf, cx, cy, 6.5, min(1, k / 0.8), green)
             if k > 0.9:
-                buf.textc(int(cy - 9), "PROTECTION: ENABLED", green_d)
+                buf.textc(max(2, int(cy) - 8), "PROTECTION: ENABLED", green_d)
         else:
             buf.textc(int(cy), "POWER: ON", green)
             if k < 0.4:
@@ -988,7 +992,7 @@ def sc_creation(buf, c):
         starts = [2, -6, 3]
         tgtx = [int(W * 0.30), int(W * 0.48), int(W * 0.64)]
         for i, sh in enumerate(shapes):
-            drop = clamp((k - i * 0.15) * 9.0, 0, 1)
+            drop = clamp((k - i * 0.35) * 2.2, 0, 1)
             bx = lerp(starts[i], tgtx[i], min(1, drop * 3))
             by = lerp(4, fy - 2 - (2 if i == 0 else 0), drop)
             for (ox, oy) in sh:
@@ -1041,13 +1045,15 @@ def sc_creation(buf, c):
         draw_hexdump(buf, W - 20, W - 2, by - 8, by + 6, t, green_d)
     else:
         conts = c.state.setdefault("conts", make_continents(24))
-        r = clamp(3 + (t - 10.9) * 2.2, 3, min(W * 0.14, (c.band_top - cy - 2) * 0.9))
+        # fixed cap so the globe never shrinks when the next line wraps
+        r = clamp(3 + (t - 10.9) * 2.2, 3, min(W * 0.14, 8.5))
         rot = t * 0.7 if li >= 7 else 0.4
         draw_globe(buf, cx, cy, r, rot, green, continents=conts)
         if li >= 7:
-            draw_persp(buf, int(cy + r * 0.8), t, green_d, gain=clamp((t - 12.4) * 0.8, 0, 1))
+            horizon = int(min(cy + r * 0.8, c.band_top - 5))
+            draw_persp(buf, horizon, t, green_d, gain=clamp((t - 12.4) * 0.8, 0, 1))
             if int(t * 2) % 2 == 0:
-                buf.textc(2, "SIMULATION RUNNING", scalec(green, 0.85))
+                buf.textc(max(2, int(cy - r) - 2), "SIMULATION RUNNING", scalec(green, 0.85))
             if c.pulse > 0.8:
                 buf.ring(cx, cy, r + (1 - c.pulse) * 6, "\u00b7", scalec(green, c.pulse))
     return {"vig": 0.3, "grain": 0.05, "scan": 0.13}
@@ -1342,7 +1348,7 @@ def sc_quirky(buf, c):
     warm = (255, 190, 120)
     magenta = (255, 110, 199)
     white = (240, 240, 255)
-    cy = (H - 6) / 2 + 2
+    cy = c.cy_canvas - 1
     cx = W / 2
     st = c.state
 
@@ -1387,9 +1393,15 @@ def sc_quirky(buf, c):
         if li == 40:
             buf.textc(2, "existence: PROOF OF YOU FOUND", scalec(warm, 0.85))
     elif base == 41:
+        fem, masc = (255, 110, 185), (110, 185, 255)
         state = 0 if (int(t * 1.4) % 2 == 0) else 1
-        draw_toggle(buf, cx, cy, 8, state, magenta, "F", "M")
-        buf.textc(int(cy + 4), "gender.swap()", scalec(white, 0.6))
+        cur = fem if state == 0 else masc
+        buf.flash(cur, 0.12 + c.pulse * 0.06)
+        draw_font(buf, int(cx) - 3, max(2, int(cy) - 9), "F" if state == 0 else "M",
+                  mixc(cur, (255, 255, 255), 0.4), FONT5)
+        draw_toggle(buf, cx, cy, 8, state, fem, masc)
+        buf.textc(int(min(cy + 4, c.band_top - 2)), "gender.swap()",
+                  scalec(white, 0.6))
     elif base == 43:
         day = 0.5 + 0.5 * math.sin(t * 0.9)
         draw_clock(buf, cx, cy, 7, t, 1 if day > 0.5 else 0)
@@ -1946,17 +1958,16 @@ def band_layout(text, W):
 def draw_chrome(buf, c, act_name):
     W, H = buf.W, buf.H
     t = c.t
-    # lyric band
+    # lyric band (band_top already smoothed by the orchestrator)
     font_lines, band_h = band_layout(c.line_text, W)
     if font_lines:
-        band_top = H - 2 - band_h
-        c.band_top = band_top
+        band_top = c.band_top
         buf.clear_rect(0, band_top, W - 1, H - 2)
         buf.fill_bg(0, band_top, W - 1, H - 2, (2, 2, 4))
         col = scalec(lyric_color(c.li), 0.9 + c.pulse * 0.1)
         total_h = sum((7 if f is FONT5 else 5) for _, f in font_lines) \
             + (len(font_lines) - 1) * 2
-        y = band_top + (band_h - 2 - total_h) // 2 + 1
+        y = H - 2 - total_h
         for s, fnt in font_lines:
             w = font_width(s, fnt)
             draw_font(buf, (W - w) // 2, y, s, col, fnt)
@@ -1986,7 +1997,8 @@ def draw_chrome(buf, c, act_name):
 # -------------------------------------------------------------- orchestration
 
 
-def render_frame(buf, t, lines, tl, scene_state_box, last_scene_idx):
+def render_frame(buf, t, lines, tl, scene_state_box, last_scene_idx,
+                 band_state=None):
     idx = 0
     for i, (t0, t1, fn, name) in enumerate(SCENES):
         if t0 <= t < t1:
@@ -2000,10 +2012,21 @@ def render_frame(buf, t, lines, tl, scene_state_box, last_scene_idx):
         last_scene_idx[0] = idx
     c = Ctx(buf, t, lines, tl)
     c.state = scene_state_box
-    # reserve the karaoke band before the scene draws
+    # karaoke band: ease band_top toward its target so scenes glide
+    # instead of jumping when consecutive lines wrap differently
     _, band_h = band_layout(c.line_text, buf.W)
-    if band_h:
-        c.band_top = buf.H - 2 - band_h
+    target = buf.H - 2 - band_h if band_h else buf.H - 2
+    if band_state is not None:
+        prev, pt = band_state
+        if prev is None or t < pt or t - pt > 0.5:
+            band_state[0] = target
+        else:
+            k = min(1.0, (t - pt) * 9.0)
+            band_state[0] = prev + (target - prev) * k
+        band_state[1] = t
+        c.band_top = int(round(band_state[0]))
+    else:
+        c.band_top = target
     c.cy_canvas = (c.band_top - 1) / 2
     params = {"vig": 0.4, "grain": 0.04, "scan": 0.12}
     try:
@@ -2142,6 +2165,7 @@ def run(args):
     keys = KeyPoller()
     scene_box = {}
     last_scene = [-1]
+    band_state = [None, 0.0]
     fps = args.fps
     frame_budget = 1.0 / fps
     paused = False
@@ -2190,7 +2214,7 @@ def run(args):
             render_t = t
             buf.clear()
             c, params = render_frame(buf, max(0.0, render_t), lines, tl,
-                                     scene_box, last_scene)
+                                     scene_box, last_scene, band_state)
             gain = 1.0
             if render_t < 0.6:
                 gain = clamp(render_t / 0.6, 0, 1)
