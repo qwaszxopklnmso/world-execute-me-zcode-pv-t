@@ -18,6 +18,7 @@ import bisect
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -36,6 +37,20 @@ PI = math.pi
 
 # ---------------------------------------------------------------- utilities
 
+# Some console fonts (e.g. CJK bitmap fonts on Chinese Windows) render block
+# and box-drawing glyphs double-width, which smears the whole frame.  We probe
+# the terminal once at startup and, if needed, fall back to an all-ASCII
+# palette through this map (checked in Buf.put / finish / render).
+NARROW_MAP = {
+    "\u2588": "#", "\u2593": "#", "\u2592": "+", "\u2591": ".",
+    "\u00b7": ".", "\u2500": "-", "\u2501": "-", "\u2502": "|",
+    "\u250c": "+", "\u2510": "+", "\u2514": "+", "\u2518": "+",
+    "\u251c": "+", "\u2524": "+", "\u252c": "+", "\u2534": "+", "\u253c": "+",
+    "\u2550": "=", "\u2551": "|", "\u2554": "+", "\u2557": "+",
+    "\u255a": "+", "\u255d": "+",
+}
+ASCII_ONLY = False
+
 
 def clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
@@ -46,8 +61,9 @@ def lerp(a, b, k):
 
 
 def rnd(seed):
-    """Deterministic pseudo-random in [0,1) from an integer seed."""
-    h = (int(seed) * 0x9E3779B1) & 0xFFFFFFFF
+    """Deterministic pseudo-random in [0,1); accepts int or float seed."""
+    h = int(seed) & 0xFFFFFFFF
+    h = (h * 0x9E3779B1) & 0xFFFFFFFF
     h ^= h >> 15
     h = (h * 0x85EBCA6B) & 0xFFFFFFFF
     h ^= h >> 13
@@ -254,7 +270,7 @@ class Buf:
         x, y = int(x), int(y)
         if 0 <= x < self.W and 0 <= y < self.H:
             i = y * self.W + x
-            self.ch[i] = ch
+            self.ch[i] = NARROW_MAP.get(ch, ch) if ASCII_ONLY else ch
             if fg is not None:
                 self.fg[i] = fg
             if bg is not None:
@@ -402,6 +418,7 @@ class Buf:
 
     def finish(self, vig=0.35, grain=0.04, scan=0.10, seed=0, gain=1.0):
         """Apply vignette + scanlines + grain + master gain in one pass."""
+        seed = int(seed)
         W, H = self.W, self.H
         cx, cy = (W - 1) / 2, (H - 1) / 2
         rmax = math.hypot(cx, cy)
@@ -427,10 +444,11 @@ class Buf:
                         self.bg[i] = scalec(b, g)
         if grain > 0:
             n = int(W * H * grain)
+            dot = "." if ASCII_ONLY else "\u00b7"
             for k in range(n):
                 i = int(rnd(seed * 977 + k) * W * H) % (W * H)
                 if self.ch[i] == " " and self.bg[i] is None:
-                    self.ch[i] = "\u00b7"
+                    self.ch[i] = dot
                     self.fg[i] = (70, 70, 80)
 
     # -- output -------------------------------------------------------------
@@ -1884,25 +1902,25 @@ def sc_end(buf, c):
     # end card
     fade = clamp((t - 208.4) / 1.6, 0, 1)
     g = fade
-    rows = [
-        ("WORLD.EXECUTE(ME);", (200, 215, 235), FONT5),
-        ("", None, None),
-        ("SONG : MILI", (150, 155, 170), FONT3),
-        ("LISTEN : MUSIC.163.COM", (150, 155, 170), FONT3),
-        ("SONG ID 435278010", (150, 155, 170), FONT3),
-        ("", None, None),
-        ("THANKS FOR SIMULATING", (255, 160, 180), FONT3),
-        ("EXIT CODE 0", (110, 220, 150), FONT3),
+    title_rows = ["WORLD.EXECUTE(ME);"]
+    if font_width(title_rows[0], FONT5) > W - 4:
+        title_rows = ["WORLD.", "EXECUTE(ME);"]
+    text_rows = [
+        ("SONG : MILI", (150, 155, 170)),
+        ("MUSIC.163.COM #435278010", (150, 155, 170)),
+        ("THANKS - EXIT CODE 0", (255, 160, 180)),
     ]
-    total_h = sum((7 if f is FONT5 else 5) + 1 for _, _, f in rows)
-    y = max(1, (H - total_h) // 2)
-    for text, col, fnt in rows:
-        if not text:
-            y += 2
-            continue
-        w = font_width(text, fnt)
-        draw_font(buf, int(cx - w / 2), y, text, scalec(col, g), fnt)
-        y += (7 if fnt is FONT5 else 5) + 1
+    h = 8 * len(title_rows) + 2 + 6 * len(text_rows)
+    y = max(1, (H - 2 - h) // 2)
+    for tr in title_rows:
+        w = font_width(tr, FONT5)
+        draw_font(buf, int(cx - w / 2), y, tr, scalec((200, 215, 235), g), FONT5)
+        y += 8
+    y += 2
+    for s, col in text_rows:
+        w = font_width(s, FONT3)
+        draw_font(buf, int(cx - w / 2), y, s, scalec(col, g), FONT3)
+        y += 6
     return {"vig": 0.0, "grain": 0.02, "scan": 0.0}
 
 
@@ -2100,6 +2118,54 @@ def leave_screen():
     sys.stdout.flush()
 
 
+def probe_wide_chars():
+    """True if the terminal renders U+2588 double-width (CJK console fonts).
+
+    Prints one full-block at the home position, then asks the terminal for
+    the cursor position via DSR 6n: a reported column of 3 means the glyph
+    consumed two cells, so we switch the whole show to ASCII glyphs.
+    """
+    global ASCII_ONLY
+    try:
+        sys.stdout.write("\x1b[1;1H\u2588\x1b[6n")
+        sys.stdout.flush()
+        resp = ""
+        deadline = time.time() + 0.4
+        if os.name == "nt":
+            import msvcrt
+            while time.time() < deadline and "R" not in resp:
+                if msvcrt.kbhit():
+                    resp += msvcrt.getwch()
+                else:
+                    time.sleep(0.01)
+        else:
+            import select
+            import termios
+            import tty
+            fd = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            tty.setcbreak(fd)
+            try:
+                while time.time() < deadline and "R" not in resp:
+                    r, _, _ = select.select([sys.stdin], [], [], 0.05)
+                    if r:
+                        resp += os.read(fd, 16).decode("utf-8", "ignore")
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        sys.stdout.write("\x1b[1;1H \x1b[1;1H")
+        sys.stdout.flush()
+        m = re.search(r"\x1b\[(\d+);(\d+)R", resp)
+        if m:
+            wide = int(m.group(2)) >= 3
+            if wide:
+                print("note: terminal font renders blocks double-width; "
+                      "using ASCII glyphs", file=sys.stderr)
+            return wide
+    except Exception:
+        pass
+    return False
+
+
 class KeyPoller:
     """Best-effort non-blocking key reads (q/esc quit, space pause)."""
 
@@ -2144,6 +2210,16 @@ def run(args):
     if W < 72 or H < 24:
         print(f"warning: terminal {W}x{H} is small; 100x36+ recommended", file=sys.stderr)
 
+    enable_vt()
+    enter_screen()
+    global ASCII_ONLY
+    if args.ascii:
+        ASCII_ONLY = True
+    else:
+        ASCII_ONLY = probe_wide_chars()
+        sys.stdout.write("\x1b[2J")
+        sys.stdout.flush()
+
     music_ok = False
     if not args.no_audio:
         try:
@@ -2159,13 +2235,12 @@ def run(args):
         except Exception as e:
             print(f"audio unavailable ({e}); running silent", file=sys.stderr)
 
-    enable_vt()
-    enter_screen()
     buf = Buf(W, H)
     keys = KeyPoller()
     scene_box = {}
     last_scene = [-1]
     band_state = [None, 0.0]
+    frame_errs = 0
     fps = args.fps
     frame_budget = 1.0 / fps
     paused = False
@@ -2212,18 +2287,25 @@ def run(args):
                         args.start = frozen_t
 
             render_t = t
-            buf.clear()
-            c, params = render_frame(buf, max(0.0, render_t), lines, tl,
-                                     scene_box, last_scene, band_state)
-            gain = 1.0
-            if render_t < 0.6:
-                gain = clamp(render_t / 0.6, 0, 1)
-            if render_t > duration + 1.4:
-                gain = clamp((duration + 3.4 - render_t) / 2.0, 0, 1)
-            buf.finish(vig=params["vig"], grain=params["grain"],
-                       scan=params["scan"], seed=params["seed"], gain=gain)
-            sys.stdout.write(buf.render())
-            sys.stdout.flush()
+            try:
+                buf.clear()
+                c, params = render_frame(buf, max(0.0, render_t), lines, tl,
+                                         scene_box, last_scene, band_state)
+                gain = 1.0
+                if render_t < 0.6:
+                    gain = clamp(render_t / 0.6, 0, 1)
+                if render_t > duration + 1.4:
+                    gain = clamp((duration + 3.4 - render_t) / 2.0, 0, 1)
+                buf.finish(vig=params["vig"], grain=params["grain"],
+                           scan=params["scan"], seed=params["seed"], gain=gain)
+                sys.stdout.write(buf.render())
+                sys.stdout.flush()
+            except Exception:
+                # a glitchy frame should never kill the whole show
+                frame_errs += 1
+                if frame_errs <= 5:
+                    import traceback
+                    traceback.print_exc()
             # pacing
             now = time.perf_counter()
             target = start_wall + (wall + frame_budget) - pause_off
@@ -2259,12 +2341,16 @@ def main():
     ap.add_argument("--volume", type=float, default=0.9)
     ap.add_argument("--size-w", type=int, default=None)
     ap.add_argument("--size-h", type=int, default=None)
+    ap.add_argument("--ascii", action="store_true",
+                    help="force ASCII glyphs (skip the double-width probe)")
     ap.add_argument("--still", type=str, default=None,
                     help="comma list of times; write preview.html and exit")
     ap.add_argument("--out", type=str, default="preview.html")
     args = ap.parse_args()
 
     if args.still:
+        global ASCII_ONLY
+        ASCII_ONLY = args.ascii
         lines = load_lrc(LRC)
         tl = load_timeline(TIMELINE)
         times = [float(x) for x in args.still.split(",")]

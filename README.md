@@ -26,6 +26,10 @@ Requires a terminal with 24-bit color and UTF-8 (Windows Terminal, PowerShell
 on Windows 10+ with VT enabled, mintty, most Linux terminals). Recommended
 window size: **100 x 36 or larger**.
 
+On console fonts that draw block glyphs double-width (e.g. CJK bitmap fonts),
+the player probes for this at startup and automatically falls back to an
+all-ASCII palette; force it with `--ascii`.
+
 ## Options
 
 | flag | meaning |
@@ -36,7 +40,12 @@ window size: **100 x 36 or larger**.
 | `--fps N` | frame cap (default 30) |
 | `--volume X` | 0.0 - 1.0 (default 0.9) |
 | `--size-w/--size-h` | override terminal size detection |
+| `--ascii` | force ASCII glyphs (skip the double-width probe) |
 | `--still "20,152,190"` | render single frames to `preview.html` and exit |
+
+> pygame ships wheels for Python 3.9-3.13; on newer interpreters
+> `pip install pygame` may fail to build — use a 3.12/3.13 Python for audio,
+> or run `--no-audio`.
 
 ## The show
 
