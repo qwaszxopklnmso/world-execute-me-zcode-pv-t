@@ -1231,7 +1231,8 @@ def sc_math(buf, c):
         else:
             m = clamp(k / 1.4, 0, 1)
             m2 = clamp((k - 1.2) / 1.0, 0, 1)
-            for x in range(4, W - 4):
+            xl, xr = 16, W - 17
+            for x in range(xl, xr):
                 ph = x / 7.0 - t * 1.2
                 v = math.sin(ph * TAU)
                 if m2 > 0:
@@ -1240,8 +1241,17 @@ def sc_math(buf, c):
                     v = lerp(v, abs(v), (m - 0.4) / 0.6)
                 y = cy - v * 6
                 buf.put(x, y, "\u2588", scalec(cyan, g))
-            buf.text(4, 3, "AC", scalec((255, 170, 90), 1.0 if m < 0.5 else 0.4))
-            buf.text(W - 8, 3, "DC", scalec((120, 255, 160), 1.0 if m2 > 0.4 else 0.4))
+            # big labels flanking the wave; the live one lights up
+            ac_on = m2 <= 0
+            dc_on = m2 > 0.3
+            ac = (255, 170, 90) if ac_on else scalec((255, 170, 90), 0.35)
+            dc = (120, 255, 160) if dc_on else scalec((120, 255, 160), 0.35)
+            if ac_on:
+                ac = mixc(ac, (255, 255, 220), 0.25 * c.pulse)
+            if dc_on:
+                dc = mixc(dc, (220, 255, 220), 0.25 * c.pulse)
+            draw_font(buf, 3, int(cy) - 3, "AC", ac, FONT5)
+            draw_font(buf, W - 14, int(cy) - 3, "DC", dc, FONT5)
     elif li in (19, 20):
         if li == 19:
             n = clamp(k / 1.4, 0, 1)
@@ -1294,6 +1304,20 @@ def sc_math(buf, c):
     return {"vig": 0.42, "grain": 0.035, "scan": 0.11}
 
 
+def chorus_slots(W, band_top):
+    """Slot origins for the sim-window wall; rows never overlap and the
+    whole grid stays above the lyric band."""
+    gw, gh = 19, 8
+    if band_top >= 26:
+        s = (band_top - 2 - gh) / 2
+        rows_y = [2, int(2 + s), int(2 + 2 * s)]
+    elif band_top >= 20:
+        rows_y = [2, band_top - 2 - gh]
+    else:
+        rows_y = [2]
+    return [(int(W * 0.06 + rx * (W * 0.23)), y) for y in rows_y for rx in range(4)], gh
+
+
 def _chorus_core(buf, c, tint, spawn_rate, stamp_mode=False):
     """Shared chorus visual: a growing wall of simulation windows."""
     t, W, H = c.t, buf.W, buf.H
@@ -1302,11 +1326,8 @@ def _chorus_core(buf, c, tint, spawn_rate, stamp_mode=False):
     if "wins" not in st:
         st["wins"] = []
         st["next_slot"] = 0
-    slots = []
-    gw, gh = 19, 8
-    for ry in range(3):
-        for rx in range(4):
-            slots.append((int(W * 0.06 + rx * (W * 0.23)), int(2 + ry * max(6, (c.band_top - 12) / 2))))
+    slots, gh = chorus_slots(W, c.band_top)
+    gw = 19
     # spawn on beats
     if "last_bi" not in st:
         st["last_bi"] = c.bi
@@ -1341,8 +1362,10 @@ def _chorus_core(buf, c, tint, spawn_rate, stamp_mode=False):
         elif w["kind"] == "wave":
             buf.sine(mx, mx + mw, my + mh / 2, 1.6, 5, t + w["slot"], col, ch="\u2588")
         elif w["kind"] == "heart":
-            draw_heart(buf, mx + mw / 2, my + mh / 2 - 1, 4.2, col,
-                       fill=w["slot"] % 2 == 0)
+            # sized so lobes+tip stay inside the interior and the title
+            # row keeps its number ("sim_002.exe", not a wall of blocks)
+            hs = min(3.4, (gh - 2) / 1.71)
+            draw_heart(buf, mx + mw / 2, y + 1.1 + 0.71 * hs, hs, col)
         else:
             for i in range(6):
                 buf.put(mx + rnd(w["slot"] * 9 + i) * mw, my + rnd(w["slot"] * 7 + i) * mh,
@@ -1781,6 +1804,7 @@ def sc_exec_chorus(buf, c):
     if li in (83, 84, 85, 86):
         wins = _chorus_core(buf, c, (255, 120, 120), spawn_rate=1, stamp_mode=True)
         st = c.state
+        slots, _gh = chorus_slots(W, c.band_top)
         stamped = st.get("stamped", 0)
         if c.bi > st.get("last_sbi", -1):
             st["last_sbi"] = c.bi
@@ -1789,15 +1813,18 @@ def sc_exec_chorus(buf, c):
         st["stamped"] = min(st["stamped"], len(wins))
         for i, w in enumerate(wins):
             if i < st["stamped"]:
-                slots_x = int(W * 0.06 + (w["slot"] % 4) * (W * 0.23))
-                slots_y = int(H * 0.16 + (w["slot"] // 4) * (H * 0.24))
+                slots_x, slots_y = slots[w["slot"] % len(slots)]
                 if t - st.get("stamp_t", 0) < 0.2 and i == st["stamped"] - 1:
                     buf.flash((255, 60, 60), 0.3)
                     buf.ghost(0.15, int(t * 37))
-                draw_font(buf, slots_x + 6, slots_y + 2, "X", (255, 60, 60), FONT3, sc=1)
-        if li == 86:
-            draw_font(buf, int(W * 0.40), c.band_top - 8, "ALONE.EXE",
-                      (255, 150, 150), FONT3)
+                draw_font(buf, slots_x + 8, slots_y + 2, "X", (255, 60, 60), FONT3, sc=1)
+        if li == 86 and k > 0.3:
+            # verdict panel replaces the last pair of slots
+            px, py = slots[-3]
+            draw_window(buf, px, py, 42, 8, "verdict", (255, 120, 120))
+            label = "ALONE.EXE"
+            lw = font_width(label, FONT3, 1)
+            draw_font(buf, px + (42 - lw) // 2, py + 1, label, (255, 150, 150), FONT3)
     elif li in (87, 88):
         warm = (255, 200, 140)
         prog = clamp(k / 1.2, 0, 1)
