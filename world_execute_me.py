@@ -685,6 +685,14 @@ def heart_points(s):
     return pts
 
 
+HEART_PIX = ("0110110",
+             "1111111",
+             "1111111",
+             "0111110",
+             "0011100",
+             "0001000")
+
+
 def draw_heart(buf, cx, cy, s, col, fill=False, progress=1.0, gain=1.0, ch="\u2588"):
     pts = heart_points(s)
     n = max(2, int(len(pts) * clamp(progress, 0, 1)))
@@ -1362,10 +1370,15 @@ def _chorus_core(buf, c, tint, spawn_rate, stamp_mode=False):
         elif w["kind"] == "wave":
             buf.sine(mx, mx + mw, my + mh / 2, 1.6, 5, t + w["slot"], col, ch="\u2588")
         elif w["kind"] == "heart":
-            # sized so lobes+tip stay inside the interior and the title
-            # row keeps its number ("sim_002.exe", not a wall of blocks)
-            hs = min(3.4, (gh - 2) / 1.71)
-            draw_heart(buf, mx + mw / 2, y + 1.1 + 0.71 * hs, hs, col)
+            # 7x6 pixel heart: the parametric curve collapses into a bar
+            # at this size; this stays inside the interior and keeps the
+            # title row readable
+            hx0 = int(mx + mw / 2 - 3)
+            hcol = mixc(col, (255, 255, 255), 0.2 * c.pulse)
+            for r, rowbits in enumerate(HEART_PIX):
+                for cc, bit in enumerate(rowbits):
+                    if bit == "1":
+                        buf.put(hx0 + cc, y + 1 + r, "\u2588", hcol)
         else:
             for i in range(6):
                 buf.put(mx + rnd(w["slot"] * 9 + i) * mw, my + rnd(w["slot"] * 7 + i) * mh,
@@ -1508,22 +1521,29 @@ def sc_quirky(buf, c):
 def sc_chorus2(buf, c):
     t, li = c.t, c.li
     W, H = buf.W, buf.H
-    _chorus_core(buf, c, (150, 150, 230), spawn_rate=1)
     cx, cy = W / 2, H * 0.3
+    prog = clamp((t - 108.69) / 1.6, 0, 1) if li == 52 else 0.0
     if li in (50,):
         for j in range(3):
             ph = (t * 0.9 + j / 3) % 1.0
             buf.ring(cx, cy, 3 + ph * (W * 0.45), "\u00b7",
                      scalec((160, 220, 255), (1 - ph) * 0.8), squish=0.45)
-    if li == 52:
-        prog = clamp((t - 108.69) / 1.6, 0, 1)
+    if li == 52 and prog < 1:
+        # sweep ring behind the wall: it peeks through the gutters
+        # instead of smearing across the window titles
         buf.ring(cx, cy, 9, "\u2500", scalec((120, 120, 140), 0.6))
         buf.ring(cx, cy, 9, "\u2588", (140, 255, 170), a0=-PI / 2,
                  a1=-PI / 2 + TAU * prog)
-        if prog >= 1:
-            draw_font(buf, int(cx - 20), int(cy - 3), "100%", (140, 255, 170), FONT3, sc=1)
-            jag = [(int(cx - 12 + i * 3), int(cy + math.sin(i * 2.1) * 4)) for i in range(9)]
-            buf.poly(jag, "\u2588", (255, 120, 90))
+    _chorus_core(buf, c, (150, 150, 230), spawn_rate=1)
+    if li == 52 and prog >= 1:
+        # completion: the centre window reports 100%
+        slots, _ghc = chorus_slots(W, c.band_top)
+        wx, wy = slots[min(6, len(slots) - 1)]
+        buf.clear_rect(wx + 1, wy + 1, wx + 17, wy + 6)
+        draw_font(buf, wx + 4, wy + 1, "100%", (140, 255, 170), FONT3)
+        jag = [(wx + 3 + i * 2, wy + 6 - int(abs(math.sin(i * 1.3)) * 2))
+               for i in range(7)]
+        buf.poly(jag, "\u2588", (255, 120, 90))
     return {"vig": 0.38, "grain": 0.04, "scan": 0.10}
 
 
@@ -1943,28 +1963,27 @@ def sc_love(buf, c):
         x0 = int(cx) - cols_n // 2
         prog = clamp(k / max(c.li_dur() * 0.7, 0.8), 0, 1)
         ncol = max(1, int(cols_n * prog))
-        dx = 2.6 / cols_n
-        grid = []
-        for i in range(cols_n + 1):
-            gx = -1.3 + i * dx
-            colv = []
-            for j in range(rows_n + 1):
-                gy = 1.12 - j * 2 * dx
-                a = gx * gx + gy * gy - 1
-                colv.append(a * a * a - gx * gx * gy * gy * gy)
-            grid.append(colv)
+        dx = 2.64 / cols_n
+        # 2x supersampled sign-change grid: the lobes crest at y~1.26 and
+        # flat arc segments otherwise break up or fall outside the window
+        def fh(gx, gy):
+            a = gx * gx + gy * gy - 1
+            return a * a * a - gx * gx * gy * gy * gy
+        fine = [[fh(-1.3 + a * dx / 2, 1.32 - b * dx)
+                 for b in range(2 * rows_n + 1)] for a in range(2 * cols_n + 1)]
         fg = mixc(rose, gold, 0.3 * c.pulse)
-        for i in range(ncol):
-            for j in range(rows_n):
-                if grid[i][j] * grid[i + 1][j] < 0 or grid[i][j] * grid[i][j + 1] < 0:
-                    buf.put(x0 + i, y_top + j, "#", fg)
+        lim = 2 * ncol
+        for a in range(lim):
+            for b in range(2 * rows_n):
+                if fine[a][b] * fine[a + 1][b] < 0 or fine[a][b] * fine[a][b + 1] < 0:
+                    buf.put(x0 + a // 2, y_top + b // 2, "#", fg)
         if prog < 1:
             sx = x0 + ncol
             buf.vline(sx, y_top, y_bot, "\u00b7", scalec(rose, 0.5))
-            for j in range(rows_n):
-                if grid[ncol - 1][j] * grid[ncol][j] < 0 or \
-                        (ncol < cols_n and grid[ncol][j] * grid[ncol][j + 1] < 0):
-                    buf.put(sx, y_top + j, "#", white)
+            for b in range(2 * rows_n):
+                if fine[lim][b] * fine[lim + 1][b] < 0 or \
+                        fine[lim][b] * fine[lim][b + 1] < 0:
+                    buf.put(sx, y_top + b // 2, "#", white)
         eq = "(x^2+y^2-1)^3 = x^2*y^3"
         shown = eq[:int(len(eq) * clamp(k / 1.4, 0, 1))]
         fy = None
@@ -2065,15 +2084,15 @@ def sc_end(buf, c):
     if font_width(title_rows[0], FONT5) > W - 4:
         title_rows = ["WORLD.", "EXECUTE(ME);"]
     text_rows = [
-        ("SONG : MILI", (150, 155, 170)),
-        ("MUSIC.163.COM #435278010", (150, 155, 170)),
+        ("SONG : MILI", (185, 195, 215)),
+        ("MUSIC.163.COM #435278010", (185, 195, 215)),
         ("THANKS - EXIT CODE 0", (255, 160, 180)),
     ]
     h = 8 * len(title_rows) + 2 + 6 * len(text_rows)
     y = max(1, (H - 2 - h) // 2)
     for tr in title_rows:
         w = font_width(tr, FONT5)
-        draw_font(buf, int(cx - w / 2), y, tr, scalec((200, 215, 235), g), FONT5)
+        draw_font(buf, int(cx - w / 2), y, tr, scalec((235, 245, 255), g), FONT5)
         y += 8
     y += 2
     for s, col in text_rows:
