@@ -585,6 +585,13 @@ class Ctx:
         i = int(x)
         return lerp(arr[i], arr[i + 1], x - i)
 
+    def li_dur(self):
+        """Duration of the current lyric line (for line-length animations)."""
+        lines = self.lines
+        if 0 <= self.li < len(lines) - 1:
+            return max(0.5, lines[self.li + 1][0] - lines[self.li][0])
+        return 4.0
+
     def rstate(self):
         """Fresh per-line state slot (resets when the lyric line changes)."""
         return self.state.setdefault(f"line{self.li}", {})
@@ -1357,7 +1364,9 @@ def sc_chorus(buf, c):
         buf.line(cx - 2.5, cy - 1, cx - 1.5, cy - 2.4, "\u2588", (255, 220, 90))
         buf.line(cx + 1.5, cy - 2.4, cx + 2.5, cy - 1, "\u2588", (255, 220, 90))
         buf.ring(cx, cy + 1.2, 2.2, "\u2588", (255, 220, 90), a0=0.25, a1=PI - 0.25, squish=0.9)
-        buf.textc(int(cy + 6), "happiness.exe", scalec((255, 220, 90), 0.8))
+        ly = int(min(cy + 6, c.band_top - 2))
+        buf.clear_rect(int(W / 2) - 9, ly - 1, int(W / 2) + 9, ly + 1)
+        buf.textc(ly, "happiness.exe", scalec((255, 220, 90), 0.8))
     if li in (30, 88):
         wx, wy = int(W * 0.30), int(H * 0.40)
         prog = clamp(k / 1.6, 0, 1)
@@ -1451,11 +1460,13 @@ def sc_quirky(buf, c):
         swap = int(t * 1.6) % 2
         sky = (120, 200, 255)
         for i, lab in enumerate(["S", "M"]):
-            px = cx + (-7 if (i == 0) != swap else 7) - 3
-            draw_window(buf, int(px), int(cy - 3), 8, 6, None,
-                        magenta if i == 0 else sky)
-            draw_font(buf, int(px) + 2, int(cy - 1), lab, white, FONT5)
-        buf.textc(int(cy + 5), "role.swap()", scalec(white, 0.6))
+            px = cx + (-8 if (i == 0) != swap else 8) - 4
+            draw_window(buf, int(px), int(cy - 4), 9, 11, None,
+                        magenta if i == 0 else sky, shadow=False)
+            draw_font(buf, int(px) + 2, int(cy - 2), lab, white, FONT5)
+        cap_y = int(min(cy + 8, c.band_top - 2))
+        buf.textc(cap_y, "role.swap()", scalec(white, 0.6))
+        st["cap45"] = cap_y
     else:  # 47/48 trance
         draw_spiral(buf, cx, cy, t * 0.9, scalec(magenta, 0.8), arms=3)
         draw_spiral(buf, cx, cy, t * 0.9 + PI, scalec((120, 200, 255), 0.6), arms=3)
@@ -1463,7 +1474,11 @@ def sc_quirky(buf, c):
         if li == 48:
             buf.wobble(1.6, t, 4)
     # spotlight floor
-    buf.hline(int(cx - 9), int(cx + 9), int(min(cy + 11, c.band_top - 2)), "\u2500", scalec(warm, 0.35))
+    floor_y = int(min(cy + 11, c.band_top - 2))
+    if base == 45 and floor_y <= st.get("cap45", -1):
+        floor_y = st["cap45"] + 1  # never stamp the floor over the caption
+    if floor_y < c.band_top - 1:
+        buf.hline(int(cx - 9), int(cx + 9), floor_y, "\u2500", scalec(warm, 0.35))
     return {"vig": 0.45, "grain": 0.05, "scan": 0.12}
 
 
@@ -1822,7 +1837,7 @@ def sc_love(buf, c):
     cx, cy = W / 2, c.cy_canvas
     draw_stars(buf, t, 40, 31, dim=(120, 80, 100), drift=0.15, y1=H - 6)
 
-    if li in (91, 92):
+    if li == 91:
         st = c.state
         if "syms" not in st:
             syms = []
@@ -1835,29 +1850,106 @@ def sc_love(buf, c):
             x = s["tx"] + math.sin(t * 0.7 + s["ph"]) * 3
             y = s["ty"] + math.cos(t * 0.5 + s["ph"]) * 2
             buf.put(x, y, s["s"], scalec(gold, 0.5 + 0.3 * math.sin(t + s["ph"])))
-        prog = clamp((t - 178.79) / 3.0, 0, 1) if li >= 92 else 0.0
-        if prog > 0:
-            draw_heart(buf, cx, cy, 9, rose, fill=False, progress=prog)
-            if prog >= 1:
-                draw_heart(buf, cx, cy, 9, mixc(rose, gold, 0.3 + 0.2 * math.sin(t * 2)),
-                           fill=True)
-    elif li in (93, 94):
-        qs = ["Q: what is love?", "Q: how much?", "Q: why me?"]
-        ans = ["A: you", "A: infinity", "A: always you"]
-        for j in range(2):
-            if k > j * 0.8:
-                x = int(W * 0.14 + j * (W * 0.42))
-                y = int(H * 0.2 + j * (H * 0.3))
-                draw_window(buf, x, y, 30, 6, "query", gold,
-                            body=[qs[(li - 93 + j) % 3], ans[(li - 93 + j) % 3]])
-                buf.put(x + 26, y + 4, "v", (140, 255, 160))
-    elif li == 95:
-        eq = "LOVE = SUM( you * me )dt"
-        draw_font(buf, (W - font_width(eq, FONT3, 1)) // 2, 2, eq, gold, FONT3)
-        prog = clamp(k / 2.4, 0, 1)
-        draw_heart(buf, cx, c.band_top - 6, min(6.0, c.band_top - 9), rose,
+    elif li == 92:
+        # oscilloscope: the heart is traced live, pen finishing the loop
+        # right as the line ends
+        hs = clamp((c.band_top - 8) * 0.45, 4, 9)
+        sw = 2 * int(hs) + 9
+        sh = int(hs * 1.75) + 5
+        sx0 = int(cx) - sw // 2
+        sy0 = max(2, min(int(cy) - sh // 2, c.band_top - sh - 2))
+        buf.rect_border(sx0, sy0, sw, sh, scalec(rose, 0.5))
+        for gx in range(sx0 + 3, sx0 + sw - 2, 4):
+            for gy in range(sy0 + 2, sy0 + sh - 1, 3):
+                buf.put(gx, gy, "\u00b7", scalec(rose, 0.22))
+        if int(t * 2.5) % 2:
+            buf.put(sx0 + sw - 3, sy0 + 1, "o", (255, 90, 90))
+        hcy = sy0 + 2 + hs * 0.69
+        prog = clamp(k / max(c.li_dur() * 0.92, 0.8), 0, 1)
+        draw_heart(buf, cx, hcy, hs, mixc(rose, gold, 0.2 * c.pulse),
                    fill=prog >= 1, progress=prog)
-        buf.flash(rose, 0.04 + c.pulse * 0.06)
+        pts = heart_points(hs)
+        pi = min(len(pts) - 1, int(len(pts) * prog))
+        buf.put(cx + pts[pi][0], hcy + pts[pi][1], "o", mixc(rose, white, 0.75))
+        if prog >= 1:
+            buf.flash(rose, 0.04 + c.pulse * 0.05)
+    elif li == 93:
+        # question broadcast: query windows pop in, "?"s drift upward
+        qs = ["> question(me)", "> define(love)"]
+        for j in range(2):
+            if k > j * 0.7:
+                x = int(W * 0.14 + j * (W * 0.42))
+                y = min(int(H * 0.18 + j * (H * 0.32)), c.band_top - 7)
+                cur = "_" if int(t * 3) % 2 else " "
+                draw_window(buf, x, max(2, y), 26, 6, "query", gold,
+                            body=[qs[j] + cur])
+        for i in range(7):
+            ph = (t * 0.45 + i / 7.0) % 1.0
+            buf.text(W * 0.08 + i * W * 0.13, cy + 7 - ph * 13, "?",
+                     scalec(gold, (1 - ph) * 0.8))
+    elif li == 94:
+        # the answer console: proofs type in and verify True
+        rows = ["> love == you", "> love == infinity", "> love == always_you"]
+        aw = 34
+        wx = int(cx) - aw // 2
+        wy = max(2, int(cy) - 6)
+        draw_window(buf, wx, wy, aw, 10, "answers.log", (140, 255, 160))
+        jdone = 0
+        for j, r in enumerate(rows):
+            tk = k - 0.25 - j * 0.45
+            if tk <= 0:
+                continue
+            shown = r[:int(len(r) * clamp(tk / 0.4, 0, 1))]
+            buf.text(wx + 2, wy + 2 + j, shown, white)
+            if tk > 0.45:
+                buf.text(wx + aw - 8, wy + 2 + j, "True", (140, 255, 160))
+                jdone = j + 1
+        if int(t * 3) % 2 and jdone < 3:
+            buf.text(wx + 2, wy + 2 + jdone, ">", (140, 255, 160))
+    elif li == 95:
+        # the algebraic expression of love, plotted live:
+        # (x^2 + y^2 - 1)^3 = x^2 * y^3
+        rows_n = clamp(int(c.band_top) - 6, 9, 18)
+        cols_n = rows_n * 2
+        y_top = clamp(int(cy) - rows_n // 2, 2, c.band_top - 4 - rows_n)
+        y_bot = y_top + rows_n
+        x0 = int(cx) - cols_n // 2
+        prog = clamp(k / max(c.li_dur() * 0.7, 0.8), 0, 1)
+        ncol = max(1, int(cols_n * prog))
+        dx = 2.6 / cols_n
+        grid = []
+        for i in range(cols_n + 1):
+            gx = -1.3 + i * dx
+            colv = []
+            for j in range(rows_n + 1):
+                gy = 1.12 - j * 2 * dx
+                a = gx * gx + gy * gy - 1
+                colv.append(a * a * a - gx * gx * gy * gy * gy)
+            grid.append(colv)
+        fg = mixc(rose, gold, 0.3 * c.pulse)
+        for i in range(ncol):
+            for j in range(rows_n):
+                if grid[i][j] * grid[i + 1][j] < 0 or grid[i][j] * grid[i][j + 1] < 0:
+                    buf.put(x0 + i, y_top + j, "#", fg)
+        if prog < 1:
+            sx = x0 + ncol
+            buf.vline(sx, y_top, y_bot, "\u00b7", scalec(rose, 0.5))
+            for j in range(rows_n):
+                if grid[ncol - 1][j] * grid[ncol][j] < 0 or \
+                        (ncol < cols_n and grid[ncol][j] * grid[ncol][j + 1] < 0):
+                    buf.put(sx, y_top + j, "#", white)
+        eq = "(x^2+y^2-1)^3 = x^2*y^3"
+        shown = eq[:int(len(eq) * clamp(k / 1.4, 0, 1))]
+        fy = None
+        if y_bot + 3 <= c.band_top:
+            fy = y_bot + 2
+        elif y_top - 3 >= 2:
+            fy = y_top - 2
+        if fy is not None:
+            buf.clear_rect(int(cx) - len(eq) // 2 - 1, fy - 1,
+                           int(cx) + len(eq) // 2 + 1, fy + 1)
+            buf.textc(fy, shown, gold)
+        buf.flash(rose, 0.03 + c.pulse * 0.04)
     else:  # 96, 97, 98 free vs trapped
         # bird flies away (you are free)
         bx = W * 0.2 + (t - 187.97) * 5.5
