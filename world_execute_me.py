@@ -1281,10 +1281,10 @@ def sc_math(buf, c):
             for i in range(0, W - 6, 6):
                 buf.put(2 + i, ty, "\u00b7", white)
             px = 4 + (t * 12) % (W - 14)
-            for j in range(5):
-                buf.put(px - j * 1.5, ty, "\u2588" if j == 0 else "\u00b7",
-                        scalec(cyan, 1 - j * 0.18))
-            draw_stars(buf, t, 40, 77, drift=3.0, y0=2, y1=int(cy + 2))
+            for j in range(9):
+                buf.put(px - j * 1.6, ty, "\u2588" if j == 0 else "\u00b7",
+                        scalec(cyan, 1 - j * 0.11))
+            draw_stars(buf, t, 60, 77, drift=3.0, y0=2, y1=int(cy + 2))
         else:
             zero = W / 2 - (t * 8) % (W * 0.6)
             buf.hline(2, W - 3, ty, "\u2500", scalec(white, 0.35))
@@ -1336,16 +1336,19 @@ def _chorus_core(buf, c, tint, spawn_rate, stamp_mode=False):
         st["next_slot"] = 0
     slots, gh = chorus_slots(W, c.band_top)
     gw = 19
-    # spawn on beats
+    # spawn on beats; the wall opens with a staggered 3-window burst so
+    # the chorus never starts on an empty screen
     if "last_bi" not in st:
         st["last_bi"] = c.bi
     if c.bi > st["last_bi"] or not st["wins"]:
         st["last_bi"] = c.bi
-        for _ in range(spawn_rate):
+        first = not st["wins"]
+        for j in range(max(3, spawn_rate) if first else spawn_rate):
             if len(st["wins"]) < len(slots):
                 kind = ["globe", "wave", "heart", "stars"][st["next_slot"] % 4]
                 st["wins"].append({"slot": st["next_slot"],
-                                   "t0": t - 0.45 - rnd(c.bi * 7 + st["next_slot"]) * 0.3,
+                                   "t0": t - 0.45 - rnd(c.bi * 7 + st["next_slot"]) * 0.3
+                                         + (j * 0.55 if first else 0.0),
                                    "kind": kind})
                 st["next_slot"] += 1
     kinds_colors = {"globe": (110, 190, 255), "wave": (120, 255, 190),
@@ -1627,9 +1630,10 @@ def sc_erase(buf, c):
             sweep = k / 1.8 * W
             for (x, y, ch) in st["debris"]:
                 if x > sweep:
-                    buf.put(x, y, ch, scalec(grey, 0.6))
-            buf.vline(sweep, 2, floor, "\u2588", scalec((255, 255, 220), 0.9))
-            buf.vline(sweep + 2, 3, floor, "\u2591", scalec((255, 255, 220), 0.4))
+                    buf.put(x, y, ch, scalec(grey, 0.85))
+            buf.vline(sweep, 2, floor, "\u2588", scalec((255, 255, 220), 0.95))
+            buf.vline(sweep + 1, 2, floor, "\u2588", scalec((255, 255, 220), 0.55))
+            buf.vline(sweep + 3, 3, floor, "\u2591", scalec((255, 255, 220), 0.4))
             if rnd(int(t * 20)) < 0.6:
                 spawn_particles(st, sweep, rnd(int(t * 50)) * floor, 2, grey, spread=8, up=8, g=40, life=0.6)
             update_particles(buf, st, 0.016)
@@ -2088,6 +2092,20 @@ def sc_end(buf, c):
         ("MUSIC.163.COM #435278010", (185, 195, 215)),
         ("THANKS - EXIT CODE 0", (255, 160, 180)),
     ]
+    if 8 * len(title_rows) + 2 + 6 * len(text_rows) > H - 3:
+        # short terminal: FONT3 card without the redundant SONG row
+        if font_width("WORLD.EXECUTE(ME);", FONT3) <= W - 4:
+            t_rows = ["WORLD.EXECUTE(ME);"]
+        else:
+            t_rows = ["WORLD.", "EXECUTE(ME);"]
+        rows = [(s, (235, 245, 255)) for s in t_rows] + list(text_rows[1:])
+        y = max(1, (H - 2 - 6 * len(rows)) // 2)
+        for s, col in rows:
+            if font_width(s, FONT3) > W - 4:
+                continue
+            draw_font(buf, (W - font_width(s, FONT3)) // 2, y, s, scalec(col, g), FONT3)
+            y += 6
+        return {"vig": 0.0, "grain": 0.02, "scan": 0.0}
     h = 8 * len(title_rows) + 2 + 6 * len(text_rows)
     y = max(1, (H - 2 - h) // 2)
     for tr in title_rows:
