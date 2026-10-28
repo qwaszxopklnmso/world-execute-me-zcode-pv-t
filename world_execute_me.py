@@ -2398,6 +2398,8 @@ class KeyPoller:
 
 def run(args):
     lines = load_lrc(LRC)
+    if args.lyr_offset:
+        lines = [(t0 + args.lyr_offset, s) for t0, s in lines]
     tl = load_timeline(TIMELINE)
     duration = tl["duration"] if tl else 211.9
 
@@ -2533,6 +2535,8 @@ def main():
     ap.add_argument("--start", type=float, default=0.0, help="begin N seconds in")
     ap.add_argument("--av-offset", type=float, default=0.0,
                     help="shift visuals vs audio (seconds, + = visuals later)")
+    ap.add_argument("--lyr-offset", type=float, default=0.0,
+                    help="shift lyric band vs audio (seconds, + = lyrics later)")
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--volume", type=float, default=0.9)
     ap.add_argument("--size-w", type=int, default=None)

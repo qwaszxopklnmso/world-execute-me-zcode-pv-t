@@ -37,6 +37,7 @@ all-ASCII palette; force it with `--ascii`.
 | `--no-audio` | visuals only |
 | `--start SECONDS` | begin N seconds into the song (seeks audio too) |
 | `--av-offset SECONDS` | nudge visuals vs. audio if your output lags |
+| `--lyr-offset SECONDS` | shift the lyric band later (+) or earlier (-) vs. the vocals |
 | `--fps N` | frame cap (default 30) |
 | `--volume X` | 0.0 - 1.0 (default 0.9) |
 | `--size-w/--size-h` | override terminal size detection |
@@ -62,7 +63,8 @@ Fourteen acts, hand-timed to the lyrics (`lyrics.lrc`):
 9. **darkness** — error-code rain over a cracked heart
 10. **execution** — twelve slamming stamps, a kill feed, ein/dos/trios…, the EXECUTE button
 11. **reprise** — stamped windows, a failing `restore`
-12. **love** — floating formulas, `LOVE = SUM( you * me )dt`, a Q&A box
+12. **love** — floating formulas, a heart traced on an oscilloscope, a
+    Q&A console, and the algebraic heart curve `(x^2+y^2-1)^3 = x^2*y^3`
 13. **alone** — a heart-shaped cage, an ECG flattening out
 14. **end** — CRT power-off, credits
 
